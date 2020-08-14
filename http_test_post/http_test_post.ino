@@ -1,3 +1,4 @@
+
 /*
   Copyright (c) 2019, SODAQ
   All rights reserved.
@@ -30,20 +31,21 @@
 */
 
 #include <Sodaq_R4X.h>
-#include <SHA256.h>
+#include "sha256.h"
+
 
 #define CONSOLE_STREAM   SerialUSB
 #define MODEM_STREAM     Serial1
 
 
-#define CURRENT_APN      "ltem.internet.m2m"
+#define CURRENT_APN      "kpnthings2.m2m"
 #define CURRENT_OPERATOR AUTOMATIC_OPERATOR
 #define CURRENT_URAT     SODAQ_R4X_LTEM_URAT
 #define CURRENT_MNO_PROFILE MNOProfiles::STANDARD_EUROPE
 
-#define HTTP_HOST        "webhook.site"
+#define HTTP_HOST        "10.151.236.157"
 #define HTTP_PORT        80
-#define HTTP_QUERY       "/345a33dc-b15f-4256-a8d6-22b4cf6f3a3d"
+#define HTTP_QUERY       "/ingestion/m2m/senml/v1"
 
 static Sodaq_R4X r4x;
 static Sodaq_SARA_R4XX_OnOff saraR4xxOnOff;
@@ -52,6 +54,8 @@ static bool isReady;
 #ifndef NBIOT_BANDMASK
 #define NBIOT_BANDMASK BAND_MASK_UNCHANGED
 #endif
+
+#define MAX_ALLOWED_BUFFER 512
 
 void setup()
 {
@@ -90,10 +94,45 @@ void loop()
 void postHTTP()
 {
   char buffer[2048];
-  char sendbuffer[1024] = "{temp: \"30,2\", user: \"787878\"}";
+  //Prepare send buffer
+  String message = "[{\"bn\":\"urn:dev:IMEI:356726104408422:\"},{\"n\": \"temperature\", \"v\": 20.5, \"u\": \"Cel\"}]"; 
+  char sendbuffer[message.length() + 1];
+  message.toCharArray(sendbuffer, message.length() + 1);  
+  CONSOLE_STREAM.print("Body:");
+  CONSOLE_STREAM.print(message);  
+  CONSOLE_STREAM.print("\n");
+
+  //Prepare messageToken
+  String sharedSecret = "72J3wD2bd49jnMI8S31j2L3vZldH3rSS";
+  CONSOLE_STREAM.print("sharedSecret:\n");
+  CONSOLE_STREAM.print(sharedSecret);  
+  CONSOLE_STREAM.print("\n"); 
+  
+  String toBeHashed = message+"\0"+sharedSecret;
+  CONSOLE_STREAM.print("Sring to hash:\n");
+  CONSOLE_STREAM.print(toBeHashed);  
+  CONSOLE_STREAM.print("\n");  
+  uint8_t *hash;
+  Sha256.init();
+  Sha256.print(toBeHashed);
+  uint8_t * result = Sha256.result();
+  String token = "";
+  CONSOLE_STREAM.print("Hash:\n");
+
+  for (int i = 0; i < 32; i++) {
+          token = token + "0123456789abcdef"[result[i] >> 4];
+          token = token + "0123456789abcdef"[result[i] & 0xf];
+  }
+  CONSOLE_STREAM.print(token);
+  CONSOLE_STREAM.print("\n");  
+  
+  char tokenBuffer[token.length() + 1];
+  token.toCharArray(tokenBuffer, token.length() + 1);   
+  
   r4x.httpClear();
   r4x.httpSetCustomHeader(0, "content-type", "application/json");
-  r4x.httpSetCustomHeader(1 , "token", "e4c9e3ae315952416bac1398df64cf3069c");
+  r4x.httpSetCustomHeader(1 , "Things-Message-Token", tokenBuffer);  
+  r4x.httpSetCustomHeader(2 , "host", "m.m");  
   char i =  r4x.httpRequest(HTTP_HOST, HTTP_PORT, HTTP_QUERY,
                             HttpRequestTypes::POST,
                             buffer,   sizeof(buffer),
